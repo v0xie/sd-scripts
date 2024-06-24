@@ -5073,7 +5073,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     return timesteps, huber_c
 
 
-def immiscible_diffusion(x_b, n_rand_b, alpha, min_timestep, max_timestep):
+def immiscible_diffusion(args, noise_scheduler, x_b, n_rand_b, alpha, min_timestep, max_timestep):
     def calculate_distance_matrix(images, noises):
         batch_size, inner_dim, height, width = images.shape
         distances = torch.zeros_like(images) # batch_size, latent_dim, height, width
@@ -5090,10 +5090,12 @@ def immiscible_diffusion(x_b, n_rand_b, alpha, min_timestep, max_timestep):
     dist_matrix = calculate_distance_matrix(x_b, n_rand_b) # batch_size, 1, height, width
     # dist_matrix = dist_matrix.view(x_b.size(0), dist_matrix.size(-1) * dist_matrix.size(-2)).transpose(0,1)
     assign_row, assign_col = linear_sum_assignment(dist_matrix.cpu().numpy())
-    assign_matrix = torch.zeros((batch_size, batch_size), dtype=torch.float32, device=x_b.device)
+    assign_matrix = torch.zeros((batch_size, batch_size), dtype=x_b.dtype, device=x_b.device)
     assign_matrix[assign_row, assign_col] = 1
     
-    alpha_t = (alpha - min_timestep) / (max_timestep - min_timestep)
+    alpha_t = noise_scheduler.alphas.to(alpha.device)
+    alpha_t = alpha_t[alpha]
+    alpha_t = alpha_t.view(batch_size, 1, 1, 1)
     sqrt_alpha_t = torch.sqrt(alpha_t)
     sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
 
@@ -5127,7 +5129,7 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
 
     if args.immiscible_noise:
         # alpha = timesteps
-        latents = immiscible_diffusion(latents, noise, timesteps, min_timestep, max_timestep)
+        latents = immiscible_diffusion(args, noise_scheduler, latents, noise, timesteps, min_timestep, max_timestep)
 
     # ...
 
