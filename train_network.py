@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 import torch
 from library.device_utils import init_ipex, clean_memory_on_device
+from grokfast import gradfilter_ma, gradfilter_ema
 
 init_ipex()
 
@@ -880,6 +881,8 @@ class NetworkTrainer:
         # For --sample_at_first
         self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
 
+        grads = None
+
         # training loop
         if initial_step > 0:  # only if skip_until_initial_step is specified
             for skip_epoch in range(epoch_to_start):  # skip epochs
@@ -1009,6 +1012,9 @@ class NetworkTrainer:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
+                    # grads = gradfilter_ma(network, grads=grads, window_size=25)
+                    # grads = gradfilter_ema(network, grads=grads)
+
                     optimizer.step()
                     lr_scheduler.step()
                     optimizer.zero_grad(set_to_none=True)
@@ -1027,6 +1033,8 @@ class NetworkTrainer:
                     global_step += 1
 
                     self.sample_images(accelerator, args, None, global_step, accelerator.device, vae, tokenizer, text_encoder, unet)
+
+                    clean_memory_on_device(accelerator.device)
 
                     # 指定ステップごとにモデルを保存
                     if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:

@@ -31,6 +31,7 @@ from io import BytesIO
 import toml
 
 from tqdm import tqdm
+from scipy.optimize import linear_sum_assignment
 
 import torch
 from library.device_utils import init_ipex, clean_memory_on_device
@@ -3379,6 +3380,11 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
         default=0.1,
         help="The huber loss parameter. Only used if one of the huber loss modes (huber or smooth l1) is selected with loss_type. default is 0.1 / Huber損失のパラメータ。loss_typeがhuberまたはsmooth l1の場合に有効。デフォルトは0.1",
     )
+    parser.add_argument(
+        "--immiscible_noise",
+        action="store_true",
+        help="Use immiscible noise",
+    )
 
     parser.add_argument(
         "--lowram",
@@ -3939,7 +3945,7 @@ def resume_from_local_or_hf_if_specified(accelerator, args):
 
     if not args.resume_from_huggingface:
         logger.info(f"resume training from local state: {args.resume}")
-        accelerator.load_state(args.resume)
+        accelerator.load_state(args.resume, strict=False)
         return
 
     logger.info(f"resume training from huggingface state: {args.resume}")
@@ -5067,6 +5073,37 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
     return timesteps, huber_c
 
 
+def immiscible_diffusion(x_b, n_rand_b, alpha, min_timestep, max_timestep):
+    def calculate_distance_matrix(images, noises):
+        batch_size, inner_dim, height, width = images.shape
+        distances = torch.zeros_like(images) # batch_size, latent_dim, height, width
+        images_flat = images.view(batch_size, -1).to(torch.float32)
+        noises_flat = noises.view(batch_size, -1).to(torch.float32)
+        dist_matrix = torch.cdist(images_flat, noises_flat, p=2)
+        #images_flat = images.permute(0,2,3,1).reshape(batch_size * height * width, inner_dim).to(dtype=torch.float16)
+        #noises_flat = noises.permute(0,2,3,1).reshape(batch_size * height * width, inner_dim).to(dtype=torch.float16)
+        #l2_norm_flat = torch.nn.functional.pairwise_distance(images_flat, noises_flat, p=2, keepdim=True)
+        #l2_norm = l2_norm_flat.view(batch_size, height, width).permute(0,3,1,2)
+        return dist_matrix 
+
+    batch_size, channel_dim, height, width = x_b.shape
+    dist_matrix = calculate_distance_matrix(x_b, n_rand_b) # batch_size, 1, height, width
+    # dist_matrix = dist_matrix.view(x_b.size(0), dist_matrix.size(-1) * dist_matrix.size(-2)).transpose(0,1)
+    assign_row, assign_col = linear_sum_assignment(dist_matrix.cpu().numpy())
+    assign_matrix = torch.zeros((batch_size, batch_size), dtype=torch.float32, device=x_b.device)
+    assign_matrix[assign_row, assign_col] = 1
+    
+    alpha_t = (alpha - min_timestep) / (max_timestep - min_timestep)
+    sqrt_alpha_t = torch.sqrt(alpha_t)
+    sqrt_one_minus_alpha_t = torch.sqrt(1 - alpha_t)
+
+    nrand_b_assigned = torch.matmul(assign_matrix, n_rand_b.view(batch_size, -1))
+    nrand_b_assigned = nrand_b_assigned.view(batch_size, channel_dim, height, width)
+    x_t_b = sqrt_alpha_t * x_b + sqrt_one_minus_alpha_t * nrand_b_assigned
+
+    return x_t_b
+
+
 def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     # Sample noise that we'll add to the latents
     noise = torch.randn_like(latents, device=latents.device)
@@ -5087,6 +5124,12 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
     timesteps, huber_c = get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler, b_size, latents.device)
+
+    if args.immiscible_noise:
+        # alpha = timesteps
+        latents = immiscible_diffusion(latents, noise, timesteps, min_timestep, max_timestep)
+
+    # ...
 
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process)
@@ -5403,7 +5446,6 @@ def sample_images_common(
     if cuda_rng_state is not None:
         torch.cuda.set_rng_state(cuda_rng_state)
     vae.to(org_vae_device)
-
 
 def sample_image_inference(
     accelerator: Accelerator,
