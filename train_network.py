@@ -1012,7 +1012,7 @@ class NetworkTrainer:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
 
-                    # grads = gradfilter_ma(network, grads=grads, window_size=25)
+                    grads = gradfilter_ma(network, grads=grads, window_size=25)
                     # grads = gradfilter_ema(network, grads=grads)
 
                     optimizer.step()
