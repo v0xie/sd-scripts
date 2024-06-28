@@ -3387,7 +3387,8 @@ def add_training_arguments(parser: argparse.ArgumentParser, support_dreambooth: 
     parser.add_argument(
         "--immiscible_noise",
         action="store_true",
-        help="Use immiscible noise",
+        help="Use Immiscible Noise algorithm to project training images only to nearby noise (from arxiv.org/abs/2406.12303) "
+        + "/ Immiscible Noise ノイズアルゴリズを使用して、トレーニング画像を近くのノイズにのみ投影します（arxiv.org/abs/2406.12303 より）",
     )
 
     parser.add_argument(
@@ -5078,6 +5079,7 @@ def get_timesteps_and_huber_c(args, min_timestep, max_timestep, noise_scheduler,
 
 
 def immiscible_diffusion(args, noise_scheduler, x_b, n_rand_b, timesteps):
+    # "Immiscible Diffusion: Accelerating Diffusion Training with Noise Assignment" (2024) Li et al. arxiv.org/abs/2406.12303
     def calculate_distance_matrix(images, noises):
         batch_size, inner_dim, height, width = images.shape
         images_flat = images.view(batch_size, -1).to(torch.float32)
