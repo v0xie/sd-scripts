@@ -5446,6 +5446,7 @@ def sample_images_common(
         torch.cuda.set_rng_state(cuda_rng_state)
     vae.to(org_vae_device)
 
+
 def sample_image_inference(
     accelerator: Accelerator,
     args: argparse.Namespace,
