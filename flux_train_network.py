@@ -7,6 +7,7 @@ from typing import Any
 import torch
 from accelerate import Accelerator
 from library.device_utils import init_ipex, clean_memory_on_device
+from library.train_util import immiscible_diffusion_get_noise
 
 init_ipex()
 
@@ -306,7 +307,10 @@ class FluxNetworkTrainer(train_network.NetworkTrainer):
             return weighting
 
         # Sample noise that we'll add to the latents
-        noise = torch.randn_like(latents)
+        if args.immiscible_noise:
+            noise = immiscible_diffusion_get_noise(args, latents)
+        else:
+            noise = torch.randn_like(latents)
         bsz = latents.shape[0]
 
         if args.timestep_sampling == "uniform" or args.timestep_sampling == "sigmoid":
